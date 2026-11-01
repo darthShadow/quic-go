@@ -10,6 +10,9 @@ type SendAlgorithm interface {
 	TimeUntilSend(bytesInFlight protocol.ByteCount) monotime.Time
 	HasPacingBudget(now monotime.Time) bool
 	OnPacketSent(sentTime monotime.Time, bytesInFlight protocol.ByteCount, packetNumber protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool)
+	// OnAppLimited marks two consecutive empty send opportunities with no
+	// intervening Write, queued application data, pending Write, or flow-control limit.
+	OnAppLimited(bytesInFlight protocol.ByteCount)
 	CanSend(bytesInFlight protocol.ByteCount) bool
 	MaybeExitSlowStart()
 	OnPacketAcked(number protocol.PacketNumber, ackedBytes protocol.ByteCount, priorInFlight protocol.ByteCount, eventTime monotime.Time)

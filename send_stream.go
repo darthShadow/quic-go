@@ -76,7 +76,9 @@ type SendStream struct {
 
 	writeChan chan struct{}
 	writeOnce chan struct{}
-	deadline  monotime.Time
+	// Shared by all send streams of a connection; set before publishing a stream.
+	writesStarted *atomic.Uint64
+	deadline      monotime.Time
 
 	flowController *streamFlowController
 }
@@ -112,6 +114,16 @@ func (s *SendStream) StreamID() StreamID {
 	return s.streamID // same for receiveStream and sendStream
 }
 
+func (s *SendStream) isAppLimited() bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// writeOnce remains occupied while Write wakes up after its data is packed.
+	// The framer can remove a flow-control-blocked stream from its active queue.
+	return len(s.writeOnce) == 0 && len(s.dataForWriting) == 0 && s.nextFrame == nil &&
+		len(s.retransmissionQueue) == 0 && s.flowController.bytesSent < s.flowController.sendWindow
+}
+
 // Write writes data to the stream.
 // Write can be made to time out using [SendStream.SetWriteDeadline].
 // If the stream was canceled, the error is a [StreamError].
@@ -131,6 +143,9 @@ func (s *SendStream) Write(p []byte) (int, error) {
 // is locked. It must be concurrency-safe and must not block or call QUIC methods.
 // A nil limiter behaves like [SendStream.Write].
 func (s *SendStream) WriteWithLimit(p []byte, limiter func(maxBytes int) int) (int, error) {
+	if s.writesStarted != nil {
+		s.writesStarted.Add(1)
+	}
 	// Concurrent use of Write is not permitted (and doesn't make any sense),
 	// but sometimes people do it anyway.
 	// Make sure that we only execute one call at any given time to avoid hard to debug failures.
@@ -148,6 +163,9 @@ func (s *SendStream) WriteWithLimit(p []byte, limiter func(maxBytes int) int) (i
 // It doesn't block for flow control credit and doesn't respect the write deadline.
 // If the entire slice can't be queued immediately, it queues nothing and returns [ErrWouldBlock].
 func (s *SendStream) TryWriteAll(p []byte) error {
+	if s.writesStarted != nil {
+		s.writesStarted.Add(1)
+	}
 	select {
 	case s.writeOnce <- struct{}{}:
 		defer func() { <-s.writeOnce }()

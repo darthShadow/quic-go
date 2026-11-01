@@ -1109,6 +1109,10 @@ func (h *sentPacketHandler) PopPacketNumber(space protocol.PacketNumberSpace) pr
 	return pn
 }
 
+func (h *sentPacketHandler) OnAppLimited() {
+	h.congestion.OnAppLimited(h.bytesInFlight)
+}
+
 func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
 	numTrackedPackets := h.hist.Len()
 

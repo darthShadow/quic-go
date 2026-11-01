@@ -2047,6 +2047,7 @@ func TestConnectionIdleTimeout(t *testing.T) {
 		}))
 
 		sph.EXPECT().GetLossDetectionTimeout().AnyTimes()
+		sph.EXPECT().OnAppLimited().Times(0)
 		sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
 		sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any())
 		sph.EXPECT().ECNMode(gomock.Any()).AnyTimes()
@@ -2190,6 +2191,7 @@ func TestConnectionACKTimer(t *testing.T) {
 		const alarmTimeout = 500 * time.Millisecond
 
 		sph.EXPECT().GetLossDetectionTimeout().AnyTimes()
+		sph.EXPECT().OnAppLimited().Times(0)
 		sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
 		sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 		sph.EXPECT().ECNMode(gomock.Any()).AnyTimes()
@@ -2275,6 +2277,7 @@ func TestConnectionGSOBatch(t *testing.T) {
 		)
 
 		// allow packets to be sent
+		sph.EXPECT().OnAppLimited().Times(0)
 		sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
 		sph.EXPECT().TimeUntilSend().AnyTimes()
 		sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
@@ -2341,6 +2344,7 @@ func TestConnectionGSOBatchPacketSize(t *testing.T) {
 		)
 
 		// allow packets to be sent
+		sph.EXPECT().OnAppLimited().Times(0)
 		sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
 		sph.EXPECT().TimeUntilSend().AnyTimes()
 		sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
@@ -2429,6 +2433,7 @@ func TestConnectionGSOBatchECN(t *testing.T) {
 
 		// allow packets to be sent
 		ecnMode := protocol.ECT1
+		sph.EXPECT().OnAppLimited().Times(0)
 		sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
 		sph.EXPECT().TimeUntilSend().AnyTimes()
 		sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
@@ -2731,6 +2736,7 @@ func testConnectionSendQueue(t *testing.T, enableGSO bool) {
 				return shortHeaderPacket{}, errNothingToPack
 			},
 		)
+		sph.EXPECT().OnAppLimited().Times(0)
 		available <- struct{}{}
 
 		synctest.Wait()

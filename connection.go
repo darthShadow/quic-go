@@ -144,9 +144,11 @@ type Conn struct {
 	largestRcvdAppData  protocol.PacketNumber
 	pathManagerOutgoing atomic.Pointer[pathManagerOutgoing]
 
-	streamsMap      *streamsMap
-	connIDManager   *connIDManager
-	connIDGenerator *connIDGenerator
+	streamsMap        *streamsMap
+	appLimitedPending bool
+	appLimitedWrites  uint64
+	connIDManager     *connIDManager
+	connIDGenerator   *connIDGenerator
 
 	rttStats  *utils.RTTStats
 	connStats utils.ConnectionStats
@@ -2481,7 +2483,20 @@ func (c *Conn) triggerSending(now monotime.Time) error {
 	sendMode := c.sentPacketHandler.SendMode(now)
 	switch sendMode {
 	case ackhandler.SendAny:
-		return c.sendPackets(now)
+		previousEmpty := c.appLimitedPending
+		c.appLimitedPending = false
+		if err := c.sendPackets(now); err != nil {
+			c.appLimitedPending = false
+			return err
+		}
+		if c.appLimitedPending {
+			writes := c.streamsMap.writesStarted.Load()
+			if previousEmpty && writes == c.appLimitedWrites {
+				c.sentPacketHandler.OnAppLimited()
+			}
+			c.appLimitedWrites = writes
+		}
+		return nil
 	case ackhandler.SendNone:
 		c.blocked = blockModeHardBlocked
 		return nil
@@ -2513,6 +2528,10 @@ func (c *Conn) triggerSending(now monotime.Time) error {
 	default:
 		return fmt.Errorf("BUG: invalid send mode %d", sendMode)
 	}
+}
+
+func (c *Conn) recordEmptySend() {
+	c.appLimitedPending = c.connFlowController.SendWindowSize() > 0 && c.streamsMap.isAppLimited()
 }
 
 func (c *Conn) sendPackets(now monotime.Time) error {
@@ -2559,8 +2578,12 @@ func (c *Conn) sendPackets(now monotime.Time) error {
 	}
 	if !c.handshakeConfirmed {
 		packet, err := c.packer.PackCoalescedPacket(false, c.maxPacketSize(), now, c.version)
-		if err != nil || packet == nil {
+		if err != nil {
 			return err
+		}
+		if packet == nil {
+			c.recordEmptySend()
+			return nil
 		}
 		c.sentFirstPacket = true
 		if err := c.sendPackedCoalescedPacket(packet, c.sentPacketHandler.ECNMode(packet.IsOnlyShortHeaderPacket()), now); err != nil {
@@ -2588,6 +2611,7 @@ func (c *Conn) sendPacketsWithoutGSO(now monotime.Time) error {
 		ecn := c.sentPacketHandler.ECNMode(true)
 		if _, err := c.appendOneShortHeaderPacket(buf, c.maxPacketSize(), ecn, now); err != nil {
 			if err == errNothingToPack {
+				c.recordEmptySend()
 				buf.Release()
 				return nil
 			}
@@ -2630,6 +2654,7 @@ func (c *Conn) sendPacketsWithGSO(now monotime.Time) error {
 			if err != errNothingToPack {
 				return err
 			}
+			c.recordEmptySend()
 			if buf.Len() == 0 {
 				buf.Release()
 				return nil

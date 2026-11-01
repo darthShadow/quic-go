@@ -20,6 +20,9 @@ type SentPacketHandler interface {
 
 	// The SendMode determines if and what kind of packets can be sent.
 	SendMode(now monotime.Time) SendMode
+	// OnAppLimited reports two consecutive empty SendAny opportunities with no
+	// intervening Write, queued stream data, pending Write, or flow-control limit.
+	OnAppLimited()
 	// TimeUntilSend is the time when the next packet should be sent.
 	// It is used for pacing packets.
 	TimeUntilSend() monotime.Time

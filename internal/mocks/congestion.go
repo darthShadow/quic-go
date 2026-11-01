@@ -267,6 +267,42 @@ func (c *MockSendAlgorithmWithDebugInfosMaybeExitSlowStartCall) DoAndReturn(f fu
 	return c
 }
 
+// OnAppLimited mocks base method.
+func (m *MockSendAlgorithmWithDebugInfos) OnAppLimited(bytesInFlight protocol.ByteCount) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "OnAppLimited", bytesInFlight)
+}
+
+// OnAppLimited indicates an expected call of OnAppLimited.
+func (mr *MockSendAlgorithmWithDebugInfosMockRecorder) OnAppLimited(bytesInFlight any) *MockSendAlgorithmWithDebugInfosOnAppLimitedCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnAppLimited", reflect.TypeOf((*MockSendAlgorithmWithDebugInfos)(nil).OnAppLimited), bytesInFlight)
+	return &MockSendAlgorithmWithDebugInfosOnAppLimitedCall{Call: call}
+}
+
+// MockSendAlgorithmWithDebugInfosOnAppLimitedCall wrap *gomock.Call
+type MockSendAlgorithmWithDebugInfosOnAppLimitedCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSendAlgorithmWithDebugInfosOnAppLimitedCall) Return() *MockSendAlgorithmWithDebugInfosOnAppLimitedCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSendAlgorithmWithDebugInfosOnAppLimitedCall) Do(f func(protocol.ByteCount)) *MockSendAlgorithmWithDebugInfosOnAppLimitedCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSendAlgorithmWithDebugInfosOnAppLimitedCall) DoAndReturn(f func(protocol.ByteCount)) *MockSendAlgorithmWithDebugInfosOnAppLimitedCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // OnCongestionEvent mocks base method.
 func (m *MockSendAlgorithmWithDebugInfos) OnCongestionEvent(number protocol.PacketNumber, lostBytes, priorInFlight protocol.ByteCount) {
 	m.ctrl.T.Helper()

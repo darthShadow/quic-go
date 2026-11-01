@@ -1213,6 +1213,12 @@ func (b *bbr3Sender) HasPacingBudget(now monotime.Time) bool {
 	return b.pacer.Budget(now, b.effectivePacingRate()) >= b.mss
 }
 
+// OnAppLimited marks delivery samples through the current flight as app-limited.
+func (b *bbr3Sender) OnAppLimited(bytesInFlight protocol.ByteCount) {
+	b.flush()
+	b.appLimited = max(b.delivered+uint64(bytesInFlight), 1)
+}
+
 func (b *bbr3Sender) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol.ByteCount, pn protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool) {
 	b.flush()
 	if isRetransmittable {
@@ -1229,8 +1235,12 @@ func (b *bbr3Sender) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol
 		if b.bw() < 150000 || uint64(bytesInFlight) >= b.cwnd {
 			b.pacer.maxLumpPackets = 1
 		}
-		b.pacer.SentPacket(sentTime, bytes, b.effectivePacingRate())
-		b.pacer.pacingLimited = uint64(bytesInFlight) < b.cwnd
+		// ACK-only sends may contain a PING even while pacing-limited.
+		// Only packets admitted by the pacer advance its schedule.
+		if b.pacer.Budget(sentTime, b.effectivePacingRate()) >= b.mss {
+			b.pacer.SentPacket(sentTime, bytes, b.effectivePacingRate())
+			b.pacer.pacingLimited = uint64(bytesInFlight) < b.cwnd
+		}
 	}
 	b.lastSentPN = pn
 	if !isRetransmittable {
