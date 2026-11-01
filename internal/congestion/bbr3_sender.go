@@ -158,7 +158,7 @@ type bbr3Sender struct {
 
 	clock    Clock
 	rttStats *utils.RTTStats
-	pacer    *pacer
+	pacer    *quichePacer
 	mss      protocol.ByteCount
 
 	// tcp_sock rate state
@@ -284,7 +284,7 @@ func NewBBR3Sender(
 		connStats:     connStats,
 		clock:         clock,
 		rttStats:      rttStats,
-		pacer:         newPacer(),
+		pacer:         newQuichePacer(),
 		mss:           initialMaxDatagramSize,
 		pkts:          make(map[protocol.PacketNumber]*b3Pkt, 4096),
 		cwnd:          uint64(initialCongestionWindow),
@@ -1215,7 +1215,23 @@ func (b *bbr3Sender) HasPacingBudget(now monotime.Time) bool {
 
 func (b *bbr3Sender) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol.ByteCount, pn protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool) {
 	b.flush()
-	b.pacer.SentPacket(sentTime, bytes, b.effectivePacingRate())
+	if isRetransmittable {
+		// quic-go includes this packet in bytesInFlight. quiche 7980e3d5d89a:
+		// pacing_sender.cc:66-81, idle burst up to cwnd.
+		priorInflight := bytesInFlight - bytes
+		if priorInflight == 0 && !b.InRecovery() {
+			b.pacer.burstTokens = min(10, b.cwnd/uint64(b.mss))
+			b.pacer.idealNextSend = 0
+		}
+		// pacing_sender.cc:87-106 and quiche_protocol_flags_list.h:70-83:
+		// two-packet lumps, at most 0.25 cwnd, one below 1.2 Mbit/s or at cwnd.
+		b.pacer.maxLumpPackets = max(1, min(2, b.cwnd/4/uint64(b.mss)))
+		if b.bw() < 150000 || uint64(bytesInFlight) >= b.cwnd {
+			b.pacer.maxLumpPackets = 1
+		}
+		b.pacer.SentPacket(sentTime, bytes, b.effectivePacingRate())
+		b.pacer.pacingLimited = uint64(bytesInFlight) < b.cwnd
+	}
 	b.lastSentPN = pn
 	if !isRetransmittable {
 		return
@@ -1275,7 +1291,12 @@ func (b *bbr3Sender) pruneStale(now monotime.Time) {
 func (b *bbr3Sender) CanSend(bytesInFlight protocol.ByteCount) bool {
 	b.flush()
 	b.recordDebugInflight(bytesInFlight)
-	return uint64(bytesInFlight) < b.cwnd
+	canSend := uint64(bytesInFlight) < b.cwnd
+	// quiche pacing_sender.cc:116-117, cwnd limitation ends catch-up.
+	if !canSend {
+		b.pacer.pacingLimited = false
+	}
+	return canSend
 }
 
 func (b *bbr3Sender) MaybeExitSlowStart() { b.flush() }
@@ -1320,6 +1341,8 @@ func (b *bbr3Sender) OnCongestionEvent(pn protocol.PacketNumber, lostBytes proto
 	if lostBytes == 0 {
 		return // ECN congestion signal, not ported
 	}
+	// quiche pacing_sender.cc:43-46, loss ends unpaced bursts.
+	b.pacer.burstTokens = 0
 	b.connStats.PacketsLost.Add(1)
 	b.connStats.BytesLost.Add(uint64(lostBytes))
 	b.flush()

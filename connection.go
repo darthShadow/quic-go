@@ -561,6 +561,9 @@ func (c *Conn) preSetup() {
 	c.creationTime = now
 
 	c.receivedPacketHandler = *ackhandler.NewReceivedPacketHandler(c.logger)
+	if c.config.ACKDecimation {
+		c.receivedPacketHandler.EnableACKDecimation(c.rttStats)
+	}
 
 	c.datagramQueue = newDatagramQueue(c.scheduleSending, c.logger, c.qlogger)
 	c.connState.Version = c.version
