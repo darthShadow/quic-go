@@ -90,7 +90,7 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 			f.Set(reflect.ValueOf(CongestionControlBBRv3))
 		case "BBRLossThresholdPercent":
 			f.Set(reflect.ValueOf(uint8(5)))
-		case "BBRNoLowerBounds", "PMTUBlackHoleDetection":
+		case "BBRNoLowerBounds", "PMTUBlackHoleDetection", "ScaledStreamGapLimit":
 			f.Set(reflect.ValueOf(true))
 		case "GetConfigForClient", "RequireAddressValidation", "GetLogWriter", "AllowConnectionWindowIncrease", "Tracer":
 			// Can't compare functions.

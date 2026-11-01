@@ -10,6 +10,7 @@ import (
 )
 
 type streamFlowController struct {
+	scaledStreamGapLimit bool
 	receiveFlowController
 
 	bytesSent     protocol.ByteCount

@@ -62,11 +62,15 @@ func newReceiveStream(
 	sender streamSender,
 	flowController *streamFlowController,
 ) *ReceiveStream {
+	queue := newFrameSorter()
+	if flowController != nil && flowController.scaledStreamGapLimit {
+		queue.flowController = flowController
+	}
 	return &ReceiveStream{
 		streamID:       streamID,
 		sender:         sender,
 		flowController: flowController,
-		frameQueue:     newFrameSorter(),
+		frameQueue:     queue,
 		readChan:       make(chan struct{}, 1),
 		readOnce:       make(chan struct{}, 1),
 		finalOffset:    protocol.MaxByteCount,

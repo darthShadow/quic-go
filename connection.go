@@ -1972,6 +1972,7 @@ func (c *Conn) handlePacket(p receivedPacket) {
 	// Discard packets once the amount of queued packets is larger than
 	// the channel size, protocol.MaxConnUnprocessedPackets
 	if c.receivedPackets.Len() >= protocol.MaxConnUnprocessedPackets {
+		recordReceiveQueueDrop()
 		if c.qlogger != nil {
 			var datagramPayloadChecksum qlog.DatagramPayloadChecksum
 			if wire.IsLongHeaderPacket(p.data[0]) {
@@ -2973,7 +2974,7 @@ func (c *Conn) newFlowController(id protocol.StreamID) *streamFlowController {
 			initialSendWindow = c.peerParams.InitialMaxStreamDataBidiLocal
 		}
 	}
-	return newStreamFlowController(
+	fc := newStreamFlowController(
 		id,
 		c.connFlowController,
 		protocol.ByteCount(c.config.InitialStreamReceiveWindow),
@@ -2982,6 +2983,8 @@ func (c *Conn) newFlowController(id protocol.StreamID) *streamFlowController {
 		c.rttStats,
 		c.logger,
 	)
+	fc.scaledStreamGapLimit = c.config.ScaledStreamGapLimit
+	return fc
 }
 
 // scheduleSending signals that we have data for sending

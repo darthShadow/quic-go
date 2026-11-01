@@ -26,17 +26,20 @@ type frameSorterEntry struct {
 }
 
 type frameSorter struct {
-	queue   map[protocol.ByteCount]frameSorterEntry
-	readPos protocol.ByteCount
-	gaps    *list.List[byteInterval]
+	gapLimit       int
+	flowController *streamFlowController
+	queue          map[protocol.ByteCount]frameSorterEntry
+	readPos        protocol.ByteCount
+	gaps           *list.List[byteInterval]
 }
 
 var errDuplicateStreamData = errors.New("duplicate stream data")
 
 func newFrameSorter() *frameSorter {
 	s := frameSorter{
-		gaps:  list.NewWithPool[byteInterval](&byteIntervalElementPool),
-		queue: make(map[protocol.ByteCount]frameSorterEntry),
+		gapLimit: researchGapLimit(),
+		gaps:     list.NewWithPool[byteInterval](&byteIntervalElementPool),
+		queue:    make(map[protocol.ByteCount]frameSorterEntry),
 	}
 	s.gaps.PushFront(byteInterval{Start: 0, End: protocol.MaxByteCount})
 	return &s
@@ -169,7 +172,18 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 		}
 	}
 
-	if s.gaps.Len() > protocol.MaxStreamFrameSorterGaps {
+	observeGapCount(uint64(s.gaps.Len()))
+	limit := protocol.ByteCount(s.gapLimit)
+	if limit == 0 {
+		limit = protocol.MaxStreamFrameSorterGaps
+		if fc := s.flowController; fc != nil {
+			fc.mutex.Lock()
+			limit = fc.receiveWindowSize/1024 + 1
+			fc.mutex.Unlock()
+		}
+	}
+	if protocol.ByteCount(s.gaps.Len()) > limit {
+		recordGapAbort(s.gaps.Front().Value)
 		return errors.New("too many gaps in received data")
 	}
 
@@ -178,6 +192,24 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 }
 
 func (s *frameSorter) findStartGap(offset protocol.ByteCount) (*list.Element[byteInterval], bool) {
+	if s.flowController != nil && offset-s.gaps.Front().Value.Start > (s.gaps.Back().Value.Start-s.gaps.Front().Value.Start)/2 {
+		last := s.gaps.Back()
+		if last != nil && offset > last.Value.End {
+			panic("no gap found")
+		}
+		for gap := last; gap != nil; gap = gap.Prev() {
+			if offset > gap.Value.End {
+				return gap.Next(), false
+			}
+			if offset >= gap.Value.Start {
+				return gap, true
+			}
+			if gap.Prev() == nil {
+				return gap, false
+			}
+		}
+		panic("no gap found")
+	}
 	for gap := s.gaps.Front(); gap != nil; gap = gap.Next() {
 		if offset >= gap.Value.Start && offset <= gap.Value.End {
 			return gap, true
@@ -190,6 +222,24 @@ func (s *frameSorter) findStartGap(offset protocol.ByteCount) (*list.Element[byt
 }
 
 func (s *frameSorter) findEndGap(startGap *list.Element[byteInterval], offset protocol.ByteCount) (*list.Element[byteInterval], bool) {
+	if s.flowController != nil && startGap != nil && offset-startGap.Value.Start > (s.gaps.Back().Value.Start-startGap.Value.Start)/2 {
+		last := s.gaps.Back()
+		if last != nil && offset >= last.Value.End {
+			panic("no gap found")
+		}
+		for gap := last; gap != nil; gap = gap.Prev() {
+			if offset >= gap.Value.End {
+				return gap, false
+			}
+			if offset >= gap.Value.Start {
+				return gap, true
+			}
+			if gap == startGap {
+				return gap.Prev(), false
+			}
+		}
+		panic("no gap found")
+	}
 	for gap := startGap; gap != nil; gap = gap.Next() {
 		if offset >= gap.Value.Start && offset < gap.Value.End {
 			return gap, true
