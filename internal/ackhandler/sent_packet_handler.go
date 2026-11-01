@@ -1073,6 +1073,9 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 	return nil
 }
 
+// PTOCount reports consecutive PTOs; newly acknowledged progress resets it.
+func (h *sentPacketHandler) PTOCount() uint32 { return h.ptoCount }
+
 func (h *sentPacketHandler) GetLossDetectionTimeout() monotime.Time {
 	return h.alarm.Time
 }

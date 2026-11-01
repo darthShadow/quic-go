@@ -519,7 +519,7 @@ func (c *Conn) preSetup() {
 	c.largestRcvdAppData = protocol.InvalidPacketNumber
 	c.initialStream = newInitialCryptoStream(c.perspective == protocol.PerspectiveClient)
 	c.handshakeStream = newCryptoStream()
-	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue = newSendQueue(c.conn, c.config.PMTUBlackHoleDetection)
 	c.retransmissionQueue = newRetransmissionQueue()
 	c.frameParser = *wire.NewFrameParser(
 		c.config.EnableDatagrams,
@@ -666,6 +666,8 @@ runLoop:
 			case <-c.timer.C:
 			case <-c.sendingScheduled:
 			case <-sendQueueAvailable:
+			case size := <-c.sendMsgSizeErrors():
+				c.handleDataMsgSizeError(monotime.Now(), size)
 			case <-c.notifyReceivedPacket:
 				wasProcessed, err := c.handlePackets()
 				if err != nil {
@@ -682,11 +684,21 @@ runLoop:
 		// Check for loss detection timeout.
 		// This could cause packets to be declared lost, and retransmissions to be enqueued.
 		now := monotime.Now()
+		select {
+		case size := <-c.sendMsgSizeErrors():
+			c.handleDataMsgSizeError(now, size)
+		default:
+		}
 		if timeout := c.sentPacketHandler.GetLossDetectionTimeout(); !timeout.IsZero() && !timeout.After(now) {
+			before := c.pmtuPTOCount()
 			if err := c.sentPacketHandler.OnLossDetectionTimeout(now); err != nil {
 				c.setCloseError(&closeError{err: err})
 				break runLoop
 			}
+			if after := c.pmtuPTOCount(); after > before && after >= 2 {
+				c.recoverPathMTU(now, "pto")
+			}
+
 		}
 
 		if keepAliveTime := c.nextKeepAliveTime(); !keepAliveTime.IsZero() && !now.Before(keepAliveTime) {
@@ -936,7 +948,7 @@ func (c *Conn) switchToNewPath(tr *Transport, now monotime.Time) {
 		c.mtuDiscoverer.Start(now)
 	}
 	c.sendQueue.Close()
-	c.sendQueue = newSendQueue(c.conn)
+	c.sendQueue = newSendQueue(c.conn, c.config.PMTUBlackHoleDetection)
 	go func() {
 		if err := c.sendQueue.Run(); err != nil {
 			c.destroyImpl(err)
@@ -2532,7 +2544,7 @@ func (c *Conn) sendPackets(now monotime.Time) error {
 		ecn := c.sentPacketHandler.ECNMode(true)
 		c.logShortHeaderPacket(p, ecn, buf.Len())
 		c.registerPackedShortHeaderPacket(p, ecn, now)
-		c.sendQueue.Send(buf, 0, ecn)
+		c.sendMTUProbe(buf, ecn)
 		// There's (likely) more data to send. Loop around again.
 		c.scheduleSending()
 		return nil

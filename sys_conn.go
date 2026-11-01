@@ -79,6 +79,9 @@ func wrapConn(pc net.PacketConn) (rawConn, error) {
 		SyscallConn() (syscall.RawConn, error)
 	})
 	var supportsDF bool
+	if adapter, ok := pc.(interface{ SupportsDF() bool }); ok {
+		supportsDF = adapter.SupportsDF()
+	}
 	if ok {
 		rawConn, err := conn.SyscallConn()
 		if err != nil {
@@ -93,6 +96,9 @@ func wrapConn(pc net.PacketConn) (rawConn, error) {
 				return nil, err
 			}
 		}
+	}
+	if adapter, ok := pc.(segmentedPacketConn); ok && adapter.SupportsGSO() {
+		return &segmentedConn{basicConn: basicConn{PacketConn: pc, supportsDF: supportsDF}, adapter: adapter}, nil
 	}
 	c, ok := pc.(OOBCapablePacketConn)
 	if !ok {
@@ -142,3 +148,25 @@ func (c *basicConn) WritePacket(b []byte, addr net.Addr, _ []byte, gsoSize uint1
 }
 
 func (c *basicConn) capabilities() connCapabilities { return connCapabilities{DF: c.supportsDF} }
+
+// segmentedPacketConn preserves the adapter's logical address and socket ownership.
+type segmentedPacketConn interface {
+	net.PacketConn
+	SupportsGSO() bool
+	WriteSegments([]byte, net.Addr, uint16) (int, error)
+}
+type segmentedConn struct {
+	basicConn
+	adapter segmentedPacketConn
+}
+
+func (c *segmentedConn) capabilities() connCapabilities {
+	return connCapabilities{DF: c.supportsDF, GSO: true}
+}
+
+func (c *segmentedConn) WritePacket(b []byte, addr net.Addr, _ []byte, size uint16, ecn protocol.ECN) (int, error) {
+	if ecn != protocol.ECNUnsupported {
+		panic("cannot use ECN with segmentedConn")
+	}
+	return c.adapter.WriteSegments(b, addr, size)
+}

@@ -118,6 +118,7 @@ func populateConfig(config *Config) *Config {
 		CongestionControl:                config.CongestionControl,
 		BBRNoLowerBounds:                 config.BBRNoLowerBounds,
 		BBRLossThresholdPercent:          config.BBRLossThresholdPercent,
+		PMTUBlackHoleDetection:           config.PMTUBlackHoleDetection,
 		GetConfigForClient:               config.GetConfigForClient,
 		Versions:                         versions,
 		HandshakeIdleTimeout:             handshakeIdleTimeout,

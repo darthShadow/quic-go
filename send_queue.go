@@ -16,30 +16,37 @@ type sender interface {
 }
 
 type queueEntry struct {
-	buf     *packetBuffer
-	gsoSize uint16
-	ecn     protocol.ECN
+	isMTUProbe bool
+	buf        *packetBuffer
+	gsoSize    uint16
+	ecn        protocol.ECN
 }
 
 type sendQueue struct {
-	queue       chan queueEntry
-	closeCalled chan struct{} // runStopped when Close() is called
-	runStopped  chan struct{} // runStopped when the run loop returns
-	available   chan struct{}
-	conn        sendConn
+	queue         chan queueEntry
+	closeCalled   chan struct{} // runStopped when Close() is called
+	runStopped    chan struct{} // runStopped when the run loop returns
+	available     chan struct{}
+	conn          sendConn
+	msgSizeErrors chan protocol.ByteCount
 }
 
 var _ sender = &sendQueue{}
 
 const sendQueueCapacity = 8
 
-func newSendQueue(conn sendConn) sender {
+func newSendQueue(conn sendConn, enabled ...bool) sender {
+	var notifications chan protocol.ByteCount
+	if len(enabled) > 0 && enabled[0] {
+		notifications = make(chan protocol.ByteCount, 1)
+	}
 	return &sendQueue{
-		conn:        conn,
-		runStopped:  make(chan struct{}),
-		closeCalled: make(chan struct{}),
-		available:   make(chan struct{}, 1),
-		queue:       make(chan queueEntry, sendQueueCapacity),
+		conn:          conn,
+		msgSizeErrors: notifications,
+		runStopped:    make(chan struct{}),
+		closeCalled:   make(chan struct{}),
+		available:     make(chan struct{}, 1),
+		queue:         make(chan queueEntry, sendQueueCapacity),
 	}
 }
 
@@ -47,8 +54,17 @@ func newSendQueue(conn sendConn) sender {
 // Callers need to make sure that there's actually space in the send queue by calling WouldBlock.
 // Otherwise Send will panic.
 func (h *sendQueue) Send(p *packetBuffer, gsoSize uint16, ecn protocol.ECN) {
+	h.send(p, gsoSize, ecn, false)
+}
+
+// SendMTUProbe queues a discovery packet whose send failure is handled as probe loss.
+func (h *sendQueue) SendMTUProbe(p *packetBuffer, ecn protocol.ECN) {
+	h.send(p, 0, ecn, true)
+}
+
+func (h *sendQueue) send(p *packetBuffer, gsoSize uint16, ecn protocol.ECN, isMTUProbe bool) {
 	select {
-	case h.queue <- queueEntry{buf: p, gsoSize: gsoSize, ecn: ecn}:
+	case h.queue <- queueEntry{buf: p, gsoSize: gsoSize, ecn: ecn, isMTUProbe: isMTUProbe}:
 		// clear available channel if we've reached capacity
 		if len(h.queue) == sendQueueCapacity {
 			select {
@@ -69,6 +85,9 @@ func (h *sendQueue) SendProbe(p *packetBuffer, addr net.Addr, info packetInfo) {
 func (h *sendQueue) WouldBlock() bool {
 	return len(h.queue) == sendQueueCapacity
 }
+
+// SendMsgSizeErrors wakes the connection loop without changing send-queue ownership.
+func (h *sendQueue) SendMsgSizeErrors() <-chan protocol.ByteCount { return h.msgSizeErrors }
 
 func (h *sendQueue) Available() <-chan struct{} {
 	return h.available
@@ -94,6 +113,18 @@ func (h *sendQueue) Run() error {
 				// 3. Eventual detection of loss PingFrame.
 				if !isSendMsgSizeErr(err) {
 					return err
+				}
+				size := e.buf.Len()
+				if e.gsoSize > 0 {
+					size = protocol.ByteCount(e.gsoSize)
+				}
+				// Probes are already registered with the loss detector. Let their
+				// existing mtuFinder handler narrow the search when declared lost.
+				if !e.isMTUProbe && size > protocol.MinInitialPacketSize {
+					select {
+					case h.msgSizeErrors <- size:
+					default:
+					}
 				}
 			}
 			e.buf.Release()
