@@ -104,6 +104,14 @@ type ConnectionIDGenerator interface {
 
 // Config contains all configuration data needed for a QUIC server or client.
 type Config struct {
+	// CongestionControl selects the path's congestion sender. Zero preserves upstream Reno mode.
+	CongestionControl CongestionControl
+	// BBRNoLowerBounds disables BBR's loss-driven bandwidth and inflight lower bounds.
+	BBRNoLowerBounds bool
+	// BBRLossThresholdPercent is BBR's tolerated loss percentage, from 1 to 100.
+	// Zero uses 2 percent. It has no effect with the default congestion sender.
+	BBRLossThresholdPercent uint8
+
 	// GetConfigForClient is called for incoming connections.
 	// If the error is not nil, the connection attempt is refused.
 	GetConfigForClient func(info *ClientInfo) (*Config, error)

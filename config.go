@@ -33,6 +33,12 @@ func validateConfig(config *Config) error {
 	if config == nil {
 		return nil
 	}
+	if config.CongestionControl > CongestionControlBBRv3 {
+		return fmt.Errorf("invalid CongestionControl: %d", config.CongestionControl)
+	}
+	if config.BBRLossThresholdPercent > 100 {
+		return fmt.Errorf("invalid BBRLossThresholdPercent: %d (require 0-100)", config.BBRLossThresholdPercent)
+	}
 	const maxStreams = 1 << 60
 	if config.MaxIncomingStreams > maxStreams {
 		config.MaxIncomingStreams = maxStreams
@@ -109,6 +115,9 @@ func populateConfig(config *Config) *Config {
 		maxIncomingUniStreams = 0
 	}
 	return &Config{
+		CongestionControl:                config.CongestionControl,
+		BBRNoLowerBounds:                 config.BBRNoLowerBounds,
+		BBRLossThresholdPercent:          config.BBRLossThresholdPercent,
 		GetConfigForClient:               config.GetConfigForClient,
 		Versions:                         versions,
 		HandshakeIdleTimeout:             handshakeIdleTimeout,
