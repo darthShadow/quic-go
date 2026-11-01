@@ -328,7 +328,7 @@ func mulDiv(a, m, d uint64) uint64 {
 func (b *bbr3Sender) minCwnd() uint64 { return b3CwndMinTarget * uint64(b.mss) }
 
 func (b *bbr3Sender) minRTTNow() int64 {
-	if m := b.rttStats.MinRTT(); m > 0 {
+	if m := b.rttStats.MinRTT(); b.rttStats.HasMeasurement() && m > 0 {
 		return m.Microseconds()
 	}
 	return b3NoRTT
@@ -1185,7 +1185,7 @@ func (b *bbr3Sender) flush() {
 		rs.lost = b.lost - rs.priorLost
 		ackUS := usOf(b.batchTime) - usOf(rs.priorTime)
 		rs.intervalUS = max(rs.sendElapsedUS, ackUS)
-		if minRTT := b.rttStats.MinRTT(); minRTT > 0 && rs.intervalUS < minRTT.Microseconds() {
+		if minRTT := b.rttStats.MinRTT(); !b.rttStats.HasMeasurement() || (minRTT > 0 && rs.intervalUS < minRTT.Microseconds()) {
 			rs.intervalUS = -1
 		}
 	}

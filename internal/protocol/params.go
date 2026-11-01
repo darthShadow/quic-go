@@ -5,8 +5,10 @@ import "time"
 // InitialPacketSize is the initial (before Path MTU discovery) maximum packet size used.
 const InitialPacketSize = 1280
 
-// MaxCongestionWindowPackets is the maximum congestion window in packet.
-const MaxCongestionWindowPackets = 10000
+// MaxCongestionWindowPackets caps the window at 50.4 MB with 1200-byte packets,
+// sized for the bandwidth-delay product of 1 Gbit/s at a 400 ms RTT.
+// Receiver flow-control windows need separate sizing for loss holes and credit-return delay.
+const MaxCongestionWindowPackets = 42000
 
 // MaxUndecryptablePackets limits the number of undecryptable packets that are queued in the connection.
 const MaxUndecryptablePackets = 32
