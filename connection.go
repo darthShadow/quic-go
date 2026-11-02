@@ -176,6 +176,7 @@ type Conn struct {
 
 	notifyReceivedPacket chan struct{}
 	sendingScheduled     chan struct{}
+	probeNow             chan struct{}
 	receivedPacketMx     sync.Mutex
 	receivedPackets      ringbuffer.RingBuffer[receivedPacket]
 
@@ -229,6 +230,17 @@ type Conn struct {
 	qlogTrace qlogwriter.Trace
 	qlogger   qlogwriter.Recorder
 	logger    utils.Logger
+}
+
+// ProbeNow requests up to two PING-only packets when the connection is in PTO
+// backoff with outstanding 1-RTT data. It returns immediately and merges queued
+// requests. Outside backoff or after closure, a request has no effect. Probes
+// preserve the scheduled timeout, outstanding frames, and congestion state.
+func (c *Conn) ProbeNow() {
+	select {
+	case c.probeNow <- struct{}{}:
+	default:
+	}
 }
 
 var _ streamSender = &Conn{}
@@ -556,6 +568,7 @@ func (c *Conn) preSetup() {
 	c.notifyReceivedPacket = make(chan struct{}, 1)
 	c.closeChan = make(chan struct{}, 1)
 	c.sendingScheduled = make(chan struct{}, 1)
+	c.probeNow = make(chan struct{}, 1)
 	c.handshakeCompleteChan = make(chan struct{})
 
 	now := monotime.Now()
@@ -670,6 +683,11 @@ runLoop:
 				break runLoop
 			case <-c.timer.C:
 			case <-c.sendingScheduled:
+			case <-c.probeNow:
+				if err := c.sendProbeNow(monotime.Now()); err != nil {
+					c.setCloseError(&closeError{err: err})
+					break runLoop
+				}
 			case <-sendQueueAvailable:
 			case size := <-c.sendMsgSizeErrors():
 				c.handleDataMsgSizeError(monotime.Now(), size)
@@ -2739,6 +2757,24 @@ func (c *Conn) maybeSendAckOnlyPacket(now monotime.Time) error {
 	c.logShortHeaderPacket(p, ecn, buf.Len())
 	c.registerPackedShortHeaderPacket(p, ecn, now)
 	c.sendQueue.Send(buf, 0, ecn)
+	return nil
+}
+
+func (c *Conn) sendProbeNow(now monotime.Time) error {
+	h, ok := c.sentPacketHandler.(interface{ PrepareProbeNow(monotime.Time) bool })
+	if !ok || !h.PrepareProbeNow(now) {
+		return nil
+	}
+	for i := 0; i < 2 && !c.sendQueue.WouldBlock(); i++ {
+		p, buf, err := c.packer.PackPingPacket(c.version)
+		if err != nil {
+			return err
+		}
+		ecn := c.sentPacketHandler.ECNMode(true)
+		c.logShortHeaderPacket(p, ecn, buf.Len())
+		c.registerPackedShortHeaderPacket(p, ecn, now)
+		c.sendQueue.Send(buf, 0, ecn)
+	}
 	return nil
 }
 

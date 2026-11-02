@@ -118,8 +118,9 @@ type sentPacketHandler struct {
 	connStats        *utils.ConnectionStats
 
 	// The number of times a PTO has been sent without receiving an ack.
-	ptoCount uint32
-	ptoMode  SendMode
+	ptoCount         uint32
+	probeNowDeadline monotime.Time
+	ptoMode          SendMode
 	// The number of PTO probe packets that should be sent.
 	// Only applies to the application-data packet number space.
 	numProbesToSend int
@@ -543,6 +544,7 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 			h.qlogger.RecordEvent(qlog.PTOCountUpdated{PTOCount: 0})
 		}
 		h.ptoCount = 0
+		h.probeNowDeadline = 0
 	}
 	h.numProbesToSend = 0
 
@@ -835,6 +837,9 @@ func (h *sentPacketHandler) lossDetectionTime(now monotime.Time) alarmTimer {
 		}
 	}
 	ptoTime, encLevel := h.getPTOTimeAndSpace(now)
+	if !h.probeNowDeadline.IsZero() && h.probeNowDeadline.Before(ptoTime) {
+		ptoTime = h.probeNowDeadline
+	}
 	if !ptoTime.IsZero() && (pathProbeLossTime.IsZero() || ptoTime.Before(pathProbeLossTime)) {
 		return alarmTimer{
 			Time:            ptoTime,
@@ -994,6 +999,7 @@ func (h *sentPacketHandler) detectLostPackets(now monotime.Time, encLevel protoc
 }
 
 func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
+	h.probeNowDeadline = 0
 	defer h.setLossDetectionTimer(now)
 
 	if h.handshakeConfirmed {
@@ -1075,6 +1081,26 @@ func (h *sentPacketHandler) OnLossDetectionTimeout(now monotime.Time) error {
 
 // PTOCount reports consecutive PTOs; newly acknowledged progress resets it.
 func (h *sentPacketHandler) PTOCount() uint32 { return h.ptoCount }
+
+// PrepareProbeNow permits PING-only probes after a confirmed handshake while
+// backed off with outstanding 1-RTT data and no timeout probes pending. It keeps
+// the current timeout and packet history intact; it does not queue any frames.
+func (h *sentPacketHandler) PrepareProbeNow(now monotime.Time) bool {
+	if !h.handshakeConfirmed || h.ptoCount == 0 || h.numProbesToSend > 0 {
+		return false
+	}
+	for _, p := range h.hist.Packets() {
+		if p.EncryptionLevel != protocol.Encryption1RTT || !p.Outstanding() {
+			continue
+		}
+		deadline := h.GetLossDetectionTimeout()
+		if h.probeNowDeadline.IsZero() || deadline.Before(h.probeNowDeadline) {
+			h.probeNowDeadline = deadline
+		}
+		return true
+	}
+	return false
+}
 
 func (h *sentPacketHandler) GetLossDetectionTimeout() monotime.Time {
 	return h.alarm.Time

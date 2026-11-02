@@ -358,6 +358,46 @@ func (c *MockPackerPackPathProbePacketCall) DoAndReturn(f func(protocol.Connecti
 	return c
 }
 
+// PackPingPacket mocks base method.
+func (m *MockPacker) PackPingPacket(v protocol.Version) (shortHeaderPacket, *packetBuffer, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PackPingPacket", v)
+	ret0, _ := ret[0].(shortHeaderPacket)
+	ret1, _ := ret[1].(*packetBuffer)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// PackPingPacket indicates an expected call of PackPingPacket.
+func (mr *MockPackerMockRecorder) PackPingPacket(v any) *MockPackerPackPingPacketCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PackPingPacket", reflect.TypeOf((*MockPacker)(nil).PackPingPacket), v)
+	return &MockPackerPackPingPacketCall{Call: call}
+}
+
+// MockPackerPackPingPacketCall wrap *gomock.Call
+type MockPackerPackPingPacketCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPackerPackPingPacketCall) Return(arg0 shortHeaderPacket, arg1 *packetBuffer, arg2 error) *MockPackerPackPingPacketCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPackerPackPingPacketCall) Do(f func(protocol.Version) (shortHeaderPacket, *packetBuffer, error)) *MockPackerPackPingPacketCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPackerPackPingPacketCall) DoAndReturn(f func(protocol.Version) (shortHeaderPacket, *packetBuffer, error)) *MockPackerPackPingPacketCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetToken mocks base method.
 func (m *MockPacker) SetToken(arg0 []byte) {
 	m.ctrl.T.Helper()
