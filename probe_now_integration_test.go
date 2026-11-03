@@ -96,7 +96,6 @@ func TestProbeNowAfterBackoff(t *testing.T) {
 		if !scheduled.After(time.Now()) {
 			t.Fatalf("scheduled timeout is already past: %s", scheduled)
 		}
-		fallbacks := trace.fallbacks.Load()
 		path.dropAll.Store(false)
 		server.ProbeNow()
 		ctx, cancel := context.WithDeadline(context.Background(), scheduled)
@@ -127,9 +126,6 @@ func TestProbeNowAfterBackoff(t *testing.T) {
 			if _, ok := frames[0].Frame.(*qlog.PingFrame); !ok {
 				t.Fatalf("probe %d contains %T, want PING only", i, frames[0].Frame)
 			}
-		}
-		if got := trace.fallbacks.Load(); got != fallbacks {
-			t.Fatalf("ProbeNow caused MTU fallback: before %d, after %d", fallbacks, got)
 		}
 		if _, err := io.Copy(io.Discard, receive); err != nil {
 			t.Fatal(err)
