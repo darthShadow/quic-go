@@ -27,7 +27,7 @@ func TestCongestionControlName(t *testing.T) {
 	}
 }
 
-func TestSiloConfigValidation(t *testing.T) {
+func TestCongestionControlConfigValidation(t *testing.T) {
 	for _, p := range []uint8{0, 1, 2, 5, 100, 101, 255} {
 		err := validateConfig(&Config{BBRLossThresholdPercent: p})
 		if (err != nil) != (p > 100) {

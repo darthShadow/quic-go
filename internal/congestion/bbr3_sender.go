@@ -2,7 +2,7 @@ package congestion
 
 // A port of Google's BBRv3 (net/ipv4/tcp_bbr3.c, branch bbr-v3-2026-09-16-01) to quic-go's
 // SendAlgorithm interface. The state machine, the model (bw_hi, bw_lo, bw_latest, inflight_hi,
-// inflight_lo, inflight_latest) and loss handling follow the C source. SILO.md
+// inflight_lo, inflight_latest) and loss handling follow the C source. PATCHES.md
 // records the current gains, defaults and quiche deviations. The names keep the
 // C names in camel case.
 //

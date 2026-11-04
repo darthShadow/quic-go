@@ -12,7 +12,7 @@ type CongestionControl uint8
 const (
 	// CongestionControlDefault preserves upstream's Reno-mode cubicSender.
 	CongestionControlDefault CongestionControl = iota
-	// CongestionControlBBRv3 selects the Silo BBRv3 port.
+	// CongestionControlBBRv3 selects the BBRv3 port.
 	CongestionControlBBRv3
 )
 

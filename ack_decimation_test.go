@@ -21,7 +21,7 @@ func TestConfigACKDecimation(t *testing.T) {
 	}
 }
 
-func TestSiloACKDecimationConnection(t *testing.T) {
+func TestACKDecimationConnection(t *testing.T) {
 	for _, perspective := range []protocol.Perspective{protocol.PerspectiveClient, protocol.PerspectiveServer} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/%t", perspective, enabled), func(t *testing.T) {

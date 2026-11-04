@@ -17,7 +17,7 @@ func TestScaledGapMatchesUpstream(t *testing.T) {
 	for seed := uint64(0); seed < 400; seed++ {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			rng := rand.New(rand.NewPCG(seed, 0))
-			scaled := siloWindowStream(48<<20, true).frameQueue
+			scaled := newReceiveStreamWithWindow(48<<20, true).frameQueue
 			upstream := newFrameSorter()
 			upstream.gapLimit = (48<<20)/1024 + 1
 			for step := 0; step < 600; step++ {
@@ -59,7 +59,7 @@ func TestScaledGapMatchesUpstream(t *testing.T) {
 }
 
 func TestScaledGapFrontSearchBound(t *testing.T) {
-	s := siloWindowStream(48<<20, true).frameQueue
+	s := newReceiveStreamWithWindow(48<<20, true).frameQueue
 	s.gaps.Front().Value.End = 2
 	for i := 1; i < 49152; i++ {
 		s.gaps.PushBack(byteInterval{Start: protocol.ByteCount(i * 4), End: protocol.ByteCount(i*4 + 2)})
@@ -87,7 +87,7 @@ func TestScaledGapFrontSearchBound(t *testing.T) {
 	}
 }
 
-func siloWindowStream(window protocol.ByteCount, scaled bool) *ReceiveStream {
+func newReceiveStreamWithWindow(window protocol.ByteCount, scaled bool) *ReceiveStream {
 	rtt := utils.NewRTTStats()
 	cfc := newConnectionFlowController(64<<20, 64<<20, nil, rtt, utils.DefaultLogger)
 	c := Conn{config: &Config{InitialStreamReceiveWindow: uint64(window), MaxStreamReceiveWindow: 48 << 20, ScaledStreamGapLimit: scaled}, peerParams: &wire.TransportParameters{}, connFlowController: cfc, rttStats: rtt, logger: utils.DefaultLogger}
@@ -96,7 +96,7 @@ func siloWindowStream(window protocol.ByteCount, scaled bool) *ReceiveStream {
 
 func TestScaledGapLimit(t *testing.T) {
 	t.Run("48-MiB-scaled", func(t *testing.T) {
-		s := siloWindowStream(48<<20, true)
+		s := newReceiveStreamWithWindow(48<<20, true)
 		for i := 0; i < 2000; i++ {
 			if err := s.handleStreamFrame(&wire.StreamFrame{Offset: protocol.ByteCount(i*4800 + 2400), Data: make([]byte, 2400)}, monotime.Now()); err != nil {
 				t.Fatalf("burst %d: %v", i, err)
@@ -107,7 +107,7 @@ func TestScaledGapLimit(t *testing.T) {
 		}
 	})
 	t.Run("default-1000", func(t *testing.T) {
-		s := siloWindowStream(48<<20, false)
+		s := newReceiveStreamWithWindow(48<<20, false)
 		for i := 1; i < 1000; i++ {
 			if err := s.handleStreamFrame(&wire.StreamFrame{Offset: protocol.ByteCount(2*i - 1), Data: []byte{1}}, monotime.Now()); err != nil {
 				t.Fatal(err)
@@ -118,7 +118,7 @@ func TestScaledGapLimit(t *testing.T) {
 		}
 	})
 	t.Run("current-window-growth", func(t *testing.T) {
-		s := siloWindowStream(1<<20, true)
+		s := newReceiveStreamWithWindow(1<<20, true)
 		for i := 1; i <= 1024; i++ {
 			if err := s.handleStreamFrame(&wire.StreamFrame{Offset: protocol.ByteCount(2*i - 1), Data: []byte{1}}, monotime.Now()); err != nil {
 				t.Fatalf("gap %d: %v", i+1, err)
