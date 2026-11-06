@@ -134,3 +134,48 @@ func TestQuichePacerResets(t *testing.T) {
 		}
 	})
 }
+
+// A paced wakeup releases one lump. The lump spans 0.5 ms at the pacing rate,
+// at least two packets, at most one GSO buffer and at most 0.25 cwnd.
+func TestBBR3LumpSpansHalfMillisecond(t *testing.T) {
+	const mss = 1452
+	for _, tc := range []struct {
+		name       string
+		rate, cwnd uint64
+		inflight   protocol.ByteCount
+		want       int
+	}{
+		{"1 Gbit/s fills one GSO buffer", 125_000_000, 50_000_000, 2 * mss, 14},
+		{"200 Mbit/s sends 0.5 ms", 25_000_000, 50_000_000, 2 * mss, 8},
+		{"50 Mbit/s keeps two packets", 6_250_000, 50_000_000, 2 * mss, 2},
+		{"quarter cwnd caps the lump", 25_000_000, 24 * mss, 2 * mss, 6},
+		{"quarter cwnd rounds down", 25_000_000, 27 * mss, 2 * mss, 6},
+		{"small cwnd keeps one packet", 25_000_000, 3 * mss, 2 * mss, 1},
+		{"below 1.2 Mbit/s keeps one packet", 149_999, 50_000_000, 2 * mss, 1},
+		{"at 1.2 Mbit/s keeps two packets", 150_000, 50_000_000, 2 * mss, 2},
+		{"at cwnd keeps one packet", 25_000_000, 24 * mss, 24 * mss, 1},
+		{"above cwnd keeps one packet", 25_000_000, 24 * mss, 25 * mss, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewBBR3Sender(DefaultClock{}, utils.NewRTTStats(), &utils.ConnectionStats{}, mss, 32*mss, 50_000_000)
+			b.cwnd, b.pacingRate, b.bwHi = tc.cwnd, tc.rate, [2]uint64{tc.rate, 0}
+			b.pacer.burstTokens = 0
+			pn := protocol.PacketNumber(1)
+			wakeup := func(now monotime.Time) int {
+				n := 0
+				for ; b.HasPacingBudget(now); n++ {
+					if n == 1000 { // A broken cwnd override refills the budget on every send.
+						t.Fatal("pacing budget never ran out")
+					}
+					b.OnPacketSent(now, tc.inflight, pn, mss, true)
+					pn++
+				}
+				return n
+			}
+			wakeup(monotime.Time(time.Second)) // Leave the 1 ms start allowance.
+			if got := wakeup(b.TimeUntilSend(tc.inflight)); got != tc.want {
+				t.Fatalf("packets per paced wakeup=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}

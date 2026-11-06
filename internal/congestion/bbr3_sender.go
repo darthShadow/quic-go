@@ -1229,9 +1229,10 @@ func (b *bbr3Sender) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol
 			b.pacer.burstTokens = min(10, b.cwnd/uint64(b.mss))
 			b.pacer.idealNextSend = 0
 		}
-		// pacing_sender.cc:87-106 and quiche_protocol_flags_list.h:70-83:
-		// two-packet lumps, at most 0.25 cwnd, one below 1.2 Mbit/s or at cwnd.
-		b.pacer.maxLumpPackets = max(1, min(2, b.cwnd/4/uint64(b.mss)))
+		// Lumps span 0.5 ms at the pacing rate, at least two packets, at most
+		// one GSO buffer and 0.25 cwnd; one below 1.2 Mbit/s or at cwnd.
+		lump := max(2, b.pacingRate/2000/uint64(b.mss))
+		b.pacer.maxLumpPackets = max(1, min(lump, protocol.MaxLargePacketBufferSize/uint64(b.mss), b.cwnd/4/uint64(b.mss)))
 		if b.bw() < 150000 || uint64(bytesInFlight) >= b.cwnd {
 			b.pacer.maxLumpPackets = 1
 		}

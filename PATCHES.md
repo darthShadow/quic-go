@@ -13,7 +13,7 @@ Module path: `github.com/quic-go/quic-go`.
 | Q4 | Adapter DF/GSO capabilities opt in through methods. `ScaledStreamGapLimit` enables the current-window gap bound and chooses the search end by offset. Default streams and CRYPTO retain 1000 gaps. The offset rule does not bound the search: a peer that places a large front gap and a dense gap cluster near the tail still costs about window/1024 gap visits per frame (49,153 at 48 MiB, against upstream's 1,000). Enable it only on receivers whose peers are trusted; keep the server's receive side on the upstream limit. | `TestAdapterCapabilities`, `TestAdapterGSOSegments`. | `quic-adapter-pmtu.patch`. |
 | Q5 | `shunpike_research` compiles the QG controls, diagnostic output, `BenchSnapshot`, `BenchBBRTuning` and their counters. They are absent from default builds. | Research-tag control checks and both tagged/default builds. | `quic-bbr-tuning.patch`, `quic-bbr-defaults.patch` and Q4 counter hunks. |
 | Q6 | `Config.ACKDecimation`, off by default, controls ACKs sent by either endpoint for application data. After 100 received packets it ACKs every 4 ack-eliciting packets with delay min(25 ms, min RTT / 4). No environment switch. | `TestConfigACKDecimation`, `TestACKDecimationConnection`, `TestACKDecimationCadence`, `TestACKDecimationCountsAllPackets`, `TestACKDecimationDelay`. | `quic-pacer-ack4.patch`. |
-| Q7 | BBRv3 uses the measured quiche pacer: initial and idle bursts, two-packet lumps, late-wakeup catch-up with a 4 ms debt cap. Only ack-eliciting packets admitted with at least one MSS of pacing budget advance the schedule; packets sent without that budget (PING-ACKs, PTO probes, coalesced extras) do not add debt. The default sender retains the upstream token bucket. | `TestQuichePacerBursts`, `TestQuichePacerLumps`, `TestQuichePacerCatchup`, `TestQuichePacerDebtCap`, `TestQuichePacerResets`, `TestBBR3PacerChargesOnlyAdmittedPackets`, `TestBBR3PacerChargesAdmittedPackets`; upstream pacer tests. | `quic-pacer-ack4.patch`. |
+| Q7 | BBRv3 uses the measured quiche pacer: initial and idle bursts, 0.5 ms lumps bounded by one GSO buffer and a quarter of cwnd, late-wakeup catch-up with a 4 ms debt cap. Only ack-eliciting packets admitted with at least one MSS of pacing budget advance the schedule; packets sent without that budget (PING-ACKs, PTO probes, coalesced extras) do not add debt. The default sender retains the upstream token bucket. | `TestQuichePacerBursts`, `TestQuichePacerLumps`, `TestBBR3LumpSpansHalfMillisecond`, `TestQuichePacerCatchup`, `TestQuichePacerDebtCap`, `TestQuichePacerResets`, `TestBBR3PacerChargesOnlyAdmittedPackets`, `TestBBR3PacerChargesAdmittedPackets`; upstream pacer tests. | `quic-pacer-ack4.patch`. |
 | Q8 | Probe now: `(*Conn).ProbeNow()` requests up to two PING-only 1-RTT packets in PTO backoff with outstanding data. Calls merge and bypass the congestion window while the send queue has room. The call preserves outstanding frames, the scheduled timeout, the probe count, congestion and RTT state; without a call, upstream behavior stays unchanged. | `TestProbeNow`, `TestProbeNowAfterBackoff`. | Direct path recovery. |
 
 `CongestionControlBBRv3` is a package constant used in `Config.CongestionControl`.
@@ -90,6 +90,12 @@ with at least one MSS of pacing budget. Unadmitted packets leave its schedule
 unchanged. Burst tokens, lumps, idle restart, and the 4 ms catch-up cap stay in
 place. The measured bundle shows no post-Startup stall; the pacer admission
 change's individual effect is not isolated.
+
+Lumps span 0.5 ms at the pacing rate instead of the anchor's two packets.
+They have a two-packet minimum, bounded by one GSO buffer and a quarter of cwnd;
+a small window, bandwidth below 1.2 Mbit/s, or a full cwnd reduces them to one
+packet. Larger lumps reduce send calls and CPU cost at high rates while keeping
+measured goodput and latency within the baseline intervals.
 
 ## Upstream Test Fixture
 
