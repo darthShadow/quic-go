@@ -26,6 +26,14 @@ func NewReceivedPacketHandler(logger utils.Logger) *ReceivedPacketHandler {
 	}
 }
 
+// EnableACKDecimation enables four-packet ACKs after the first 100 application
+// data packets. rtt supplies the live minimum RTT for the ACK delay bound;
+// a nil estimate retains MaxAckDelay. Call before receiving packets.
+func (h *ReceivedPacketHandler) EnableACKDecimation(rtt *utils.RTTStats) {
+	h.appDataPackets.ackDecimation = true
+	h.appDataPackets.rttStats = rtt
+}
+
 func (h *ReceivedPacketHandler) ReceivedPacket(
 	pn protocol.PacketNumber,
 	ecn protocol.ECN,

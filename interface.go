@@ -114,6 +114,11 @@ type Config struct {
 	// PMTUBlackHoleDetection enables fallback to 1200 bytes on a post-handshake
 	// data-packet EMSGSIZE or two consecutive PTOs, followed by MTU discovery.
 	PMTUBlackHoleDetection bool
+	// ACKDecimation changes ACKs sent by this endpoint for application data:
+	// after 100 received packets, ACK every 4 ack-eliciting packets with a delay
+	// bounded by min(25 ms, min RTT / 4). It applies to clients and servers and
+	// is off by default. It does not change the peer's ACK policy.
+	ACKDecimation bool
 
 	// GetConfigForClient is called for incoming connections.
 	// If the error is not nil, the connection attempt is refused.

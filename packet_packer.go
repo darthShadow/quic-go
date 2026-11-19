@@ -28,6 +28,7 @@ type packer interface {
 	PackApplicationClose(*qerr.ApplicationError, protocol.ByteCount, protocol.Version) (*coalescedPacket, error)
 	PackPathProbePacket(protocol.ConnectionID, []ackhandler.Frame, protocol.Version) (shortHeaderPacket, *packetBuffer, error)
 	PackMTUProbePacket(ping ackhandler.Frame, size protocol.ByteCount, v protocol.Version) (shortHeaderPacket, *packetBuffer, error)
+	PackPingPacket(v protocol.Version) (shortHeaderPacket, *packetBuffer, error)
 
 	SetToken([]byte)
 }
@@ -828,6 +829,28 @@ func (p *packetPacker) packPTOProbePacket1RTT(maxPacketSize protocol.ByteCount, 
 	}
 	packet.shortHdrPacket = &shp
 	return packet, nil
+}
+
+// PackPingPacket packs one 1-RTT PING without ACKs, data, or MTU probe padding.
+func (p *packetPacker) PackPingPacket(v protocol.Version) (shortHeaderPacket, *packetBuffer, error) {
+	s, err := p.cryptoSetup.Get1RTTSealer()
+	if err != nil {
+		return shortHeaderPacket{}, nil, err
+	}
+	ping := &wire.PingFrame{}
+	pl := payload{
+		frames: []ackhandler.Frame{{Frame: ping, Handler: emptyHandler{}}},
+		length: ping.Length(v),
+	}
+	connID := p.getDestConnID()
+	pn, pnLen := p.pnManager.PeekPacketNumber(protocol.PacketNumberSpaceAppData)
+	buffer := getPacketBuffer()
+	packet, err := p.appendShortHeaderPacket(buffer, connID, pn, pnLen, s.KeyPhase(), pl, 0, protocol.MinInitialPacketSize, s, false, v)
+	if err != nil {
+		buffer.Release()
+		return shortHeaderPacket{}, nil, err
+	}
+	return packet, buffer, nil
 }
 
 func (p *packetPacker) PackMTUProbePacket(ping ackhandler.Frame, size protocol.ByteCount, v protocol.Version) (shortHeaderPacket, *packetBuffer, error) {

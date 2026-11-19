@@ -34,6 +34,7 @@ type benchMTUPath struct {
 	burstDropped  atomic.Uint64
 	emsgsize      atomic.Bool
 	randomLoss    atomic.Bool
+	dropAll       atomic.Bool
 }
 
 func (*benchMTUPath) SupportsDF() bool { return true }
@@ -43,6 +44,10 @@ func (p *benchMTUPath) SyscallConn() (syscall.RawConn, error) {
 
 func (p *benchMTUPath) WriteTo(b []byte, addr net.Addr) (int, error) {
 	n := p.attempts.Add(1)
+	if p.dropAll.Load() {
+		p.dropped.Add(1)
+		return len(b), nil
+	}
 	if limit := p.limit.Load(); limit > 0 && int64(len(b)) > limit {
 		p.dropped.Add(1)
 		if p.emsgsize.Load() {
@@ -67,6 +72,7 @@ func (p *benchMTUPath) WriteTo(b []byte, addr net.Addr) (int, error) {
 }
 
 type benchMTUTrace struct {
+	observe          func(qlogwriter.Event)
 	size             atomic.Int64
 	grown            atomic.Bool
 	pto              atomic.Uint32
@@ -80,6 +86,9 @@ func (r *benchMTUTrace) AddProducer() qlogwriter.Recorder                       
 func (*benchMTUTrace) SupportsSchemas(s string) bool                              { return s == qlog.EventSchema }
 func (*benchMTUTrace) Close() error                                               { return nil }
 func (r *benchMTUTrace) RecordEvent(e qlogwriter.Event) {
+	if r.observe != nil {
+		r.observe(e)
+	}
 	if event, ok := e.(qlog.PTOCountUpdated); ok {
 		r.pto.Store(event.PTOCount)
 	}
@@ -99,6 +108,11 @@ func (r *benchMTUTrace) RecordEvent(e qlogwriter.Event) {
 
 func benchMTUConnect(t *testing.T, path *benchMTUPath, trace *benchMTUTrace) (*Conn, *Conn) {
 	t.Helper()
+	return benchMTUConnectWithConfig(t, path, &Config{MaxIdleTimeout: 2 * time.Second, Tracer: trace.New})
+}
+
+func benchMTUConnectWithConfig(t *testing.T, path *benchMTUPath, config *Config) (*Conn, *Conn) {
+	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +122,6 @@ func benchMTUConnect(t *testing.T, path *benchMTUPath, trace *benchMTUTrace) (*C
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := &Config{MaxIdleTimeout: 2 * time.Second, Tracer: trace.New}
 	// A tests-only overlay also runs on upstream before the opt-in field exists.
 	if f := reflect.ValueOf(config).Elem().FieldByName("PMTUBlackHoleDetection"); f.IsValid() {
 		f.SetBool(path.detect)
