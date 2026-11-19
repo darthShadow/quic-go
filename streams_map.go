@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/quic-go/quic-go/internal/monotime"
 	"github.com/quic-go/quic-go/internal/protocol"
@@ -35,6 +36,7 @@ type streamsMap struct {
 	incomingBidiStreams   *incomingStreamsMap[*Stream]
 	incomingUniStreams    *incomingStreamsMap[*ReceiveStream]
 	reset                 bool
+	writesStarted         atomic.Uint64
 	supportsResetStreamAt bool
 }
 
@@ -64,7 +66,9 @@ func (m *streamsMap) initMaps() {
 	m.outgoingBidiStreams = newOutgoingStreamsMap(
 		protocol.StreamTypeBidi,
 		func(id protocol.StreamID) *Stream {
-			return newStream(m.ctx, id, m.sender, m.newFlowController(id), m.supportsResetStreamAt)
+			str := newStream(m.ctx, id, m.sender, m.newFlowController(id), m.supportsResetStreamAt)
+			str.sendStr.writesStarted = &m.writesStarted
+			return str
 		},
 		m.queueControlFrame,
 		m.perspective,
@@ -72,7 +76,9 @@ func (m *streamsMap) initMaps() {
 	m.incomingBidiStreams = newIncomingStreamsMap(
 		protocol.StreamTypeBidi,
 		func(id protocol.StreamID) *Stream {
-			return newStream(m.ctx, id, m.sender, m.newFlowController(id), m.supportsResetStreamAt)
+			str := newStream(m.ctx, id, m.sender, m.newFlowController(id), m.supportsResetStreamAt)
+			str.sendStr.writesStarted = &m.writesStarted
+			return str
 		},
 		m.maxIncomingBidiStreams,
 		m.queueControlFrame,
@@ -81,7 +87,9 @@ func (m *streamsMap) initMaps() {
 	m.outgoingUniStreams = newOutgoingStreamsMap(
 		protocol.StreamTypeUni,
 		func(id protocol.StreamID) *SendStream {
-			return newSendStream(m.ctx, id, m.sender, m.newFlowController(id), m.supportsResetStreamAt)
+			str := newSendStream(m.ctx, id, m.sender, m.newFlowController(id), m.supportsResetStreamAt)
+			str.writesStarted = &m.writesStarted
+			return str
 		},
 		m.queueControlFrame,
 		m.perspective,
@@ -106,6 +114,37 @@ func (m *streamsMap) OpenStream() (*Stream, error) {
 		return nil, Err0RTTRejected
 	}
 	return mm.OpenStream()
+}
+
+func (m *streamsMap) isAppLimited() bool {
+	m.mutex.Lock()
+	outgoingBidi, outgoingUni, incomingBidi := m.outgoingBidiStreams, m.outgoingUniStreams, m.incomingBidiStreams
+	m.mutex.Unlock()
+
+	// Release map locks before inspecting stream state, as stream callbacks can
+	// enter the maps. Receive-only streams have no application send buffer.
+	var streams []*SendStream
+	outgoingBidi.mutex.RLock()
+	for _, str := range outgoingBidi.streams {
+		streams = append(streams, str.sendStr)
+	}
+	outgoingBidi.mutex.RUnlock()
+	outgoingUni.mutex.RLock()
+	for _, str := range outgoingUni.streams {
+		streams = append(streams, str)
+	}
+	outgoingUni.mutex.RUnlock()
+	incomingBidi.mutex.RLock()
+	for _, entry := range incomingBidi.streams {
+		streams = append(streams, entry.stream.sendStr)
+	}
+	incomingBidi.mutex.RUnlock()
+	for _, str := range streams {
+		if !str.isAppLimited() {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *streamsMap) OpenStreamSync(ctx context.Context) (*Stream, error) {

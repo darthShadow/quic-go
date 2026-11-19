@@ -161,6 +161,8 @@ func (c *cubicSender) minCongestionWindow() protocol.ByteCount {
 	return c.maxDatagramSize * minCongestionWindowPackets
 }
 
+func (c *cubicSender) OnAppLimited(protocol.ByteCount) {}
+
 func (c *cubicSender) OnPacketSent(
 	sentTime monotime.Time,
 	_ protocol.ByteCount,

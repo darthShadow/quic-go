@@ -112,9 +112,10 @@ type sentPacketHandler struct {
 
 	bytesInFlight protocol.ByteCount
 
-	congestion congestion.SendAlgorithmWithDebugInfos
-	rttStats   *utils.RTTStats
-	connStats  *utils.ConnectionStats
+	congestionConfig congestion.SenderConfig
+	congestion       congestion.SendAlgorithmWithDebugInfos
+	rttStats         *utils.RTTStats
+	connStats        *utils.ConnectionStats
 
 	// The number of times a PTO has been sent without receiving an ack.
 	ptoCount uint32
@@ -140,6 +141,7 @@ var _ SentPacketHandler = &sentPacketHandler{}
 
 // clientAddressValidated indicates whether the address was validated beforehand by an address validation token.
 // If the address was validated, the amplification limit doesn't apply. It has no effect for a client.
+// Optional congestion configuration also applies after path migration.
 func NewSentPacketHandler(
 	initialPN protocol.PacketNumber,
 	initialMaxDatagramSize protocol.ByteCount,
@@ -151,15 +153,13 @@ func NewSentPacketHandler(
 	pers protocol.Perspective,
 	qlogger qlogwriter.Recorder,
 	logger utils.Logger,
+	configs ...congestion.SenderConfig,
 ) SentPacketHandler {
-	congestion := congestion.NewCubicSender(
-		congestion.DefaultClock{},
-		rttStats,
-		connStats,
-		initialMaxDatagramSize,
-		true, // use Reno
-		qlogger,
-	)
+	var config congestion.SenderConfig
+	if len(configs) > 0 {
+		config = configs[0]
+	}
+	sender := congestion.NewSender(congestion.DefaultClock{}, rttStats, connStats, initialMaxDatagramSize, qlogger, config)
 
 	h := &sentPacketHandler{
 		peerCompletedAddressValidation: pers == protocol.PerspectiveServer,
@@ -178,13 +178,14 @@ func NewSentPacketHandler(
 		lostPackets:        *newLostPacketTracker(),
 		rttStats:           rttStats,
 		connStats:          connStats,
-		congestion:         congestion,
+		congestion:         sender,
+		congestionConfig:   config,
 		ignorePacketsBelow: ignorePacketsBelow,
 		perspective:        pers,
 		qlogger:            qlogger,
 		logger:             logger,
 	}
-	if enableECN {
+	if enableECN && !config.BBRv3 {
 		h.enableECN = true
 		h.ecnTracker = newECNTracker(logger, qlogger)
 	}
@@ -1105,6 +1106,10 @@ func (h *sentPacketHandler) PopPacketNumber(space protocol.PacketNumberSpace) pr
 	return pn
 }
 
+func (h *sentPacketHandler) OnAppLimited() {
+	h.congestion.OnAppLimited(h.bytesInFlight)
+}
+
 func (h *sentPacketHandler) SendMode(now monotime.Time) SendMode {
 	numTrackedPackets := h.hist.Len()
 
@@ -1255,14 +1260,8 @@ func (h *sentPacketHandler) MigratedPath(now monotime.Time, initialMaxDatagramSi
 	for pn := range h.hist.PathProbes() {
 		h.hist.RemovePathProbe(pn)
 	}
-	h.congestion = congestion.NewCubicSender(
-		congestion.DefaultClock{},
-		h.rttStats,
-		h.connStats,
-		initialMaxDatagramSize,
-		true, // use Reno
-		h.qlogger,
-	)
+	h.congestion = congestion.NewSender(congestion.DefaultClock{}, h.rttStats, h.connStats, initialMaxDatagramSize, h.qlogger, h.congestionConfig)
+
 	h.qlogRecoveryParametersSet(true)
 	h.setLossDetectionTimer(now)
 }
