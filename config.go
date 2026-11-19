@@ -119,6 +119,7 @@ func populateConfig(config *Config) *Config {
 		BBRNoLowerBounds:                 config.BBRNoLowerBounds,
 		BBRLossThresholdPercent:          config.BBRLossThresholdPercent,
 		PMTUBlackHoleDetection:           config.PMTUBlackHoleDetection,
+		ScaledStreamGapLimit:             config.ScaledStreamGapLimit,
 		ACKDecimation:                    config.ACKDecimation,
 		GetConfigForClient:               config.GetConfigForClient,
 		Versions:                         versions,
