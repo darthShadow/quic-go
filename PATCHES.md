@@ -3,18 +3,43 @@
 Base: quic-go `v0.64.1`, commit `ed90516797ec8ed7314c2b163797eca58fd5a2b8`.
 Module path: `github.com/quic-go/quic-go`.
 
+This fork carries the changes that shunpike needs from quic-go. Shunpike's
+`n4` package serves HTTP/3 between a media server and its clients over a
+`net.PacketConn` that wraps a Tailscale magicsock bind, on direct paths that
+can be long and lose packets. Each patch is opt-in: a build that sets none of
+the new options keeps upstream behavior, apart from the shared congestion
+window ceiling (D10) and the app-limited signal that the default sender
+ignores (D9).
+
+## Tags and History
+
+The fork tag format is `<upstream-version>-shunpike.<n>`.
+
+- `v0.64.1-shunpike.1`, the first release, points at the earlier, finer
+  history: one commit per patch and follow-up fix.
+- `v0.64.1-shunpike.2` is the first tag on the consolidated history, which
+  groups the same patches into four commits by area. Its Go code is the same
+  as `v0.64.1-shunpike.1`; only this file and the fork CI workflow differ.
+
 ## Patch Inventory
 
-| Patch | Intent and Opt-In | Tests | Source |
-|---|---|---|---|
-| Q1 | `Config.CongestionControl = CongestionControlBBRv3` selects the BBRv3 port for initial and migrated paths. The zero value keeps upstream's Reno-mode cubicSender. `CongestionControlName` uses the same factory. | `TestDefaultConfigSelectsUpstreamSender`, `TestSenderIdentityBBRv3`, `TestCongestionControlName`. | `bbr3-quic-go.patch`. |
-| Q2 | `BBRNoLowerBounds` and `BBRLossThresholdPercent` belong to each sender. Zero percent selects 2 percent; 1-100 are accepted. | `TestBBRLossThresholdBounds`, `TestCongestionControlConfigValidation`. | `bbr3-quic-go.patch`. |
-| Q3 | `PMTUBlackHoleDetection` enables post-handshake data-packet EMSGSIZE and two-PTO fallback to 1200 bytes, then re-probing. Probe errors remain probe losses. | `TestPMTUErrorSignal`. | `quic-pmtu-blackhole.patch`. |
-| Q4 | Adapter DF/GSO capabilities opt in through methods. `ScaledStreamGapLimit` enables the current-window gap bound and chooses the search end by offset. Default streams and CRYPTO retain 1000 gaps. The offset rule does not bound the search: a peer that places a large front gap and a dense gap cluster near the tail still costs about window/1024 gap visits per frame (49,153 at 48 MiB, against upstream's 1,000). Enable it only on receivers whose peers are trusted; keep the server's receive side on the upstream limit. | `TestAdapterCapabilities`, `TestAdapterGSOSegments`. | `quic-adapter-pmtu.patch`. |
-| Q5 | `shunpike_research` compiles the QG controls, diagnostic output, `BenchSnapshot`, `BenchBBRTuning` and their counters. They are absent from default builds. | Research-tag control checks and both tagged/default builds. | `quic-bbr-tuning.patch`, `quic-bbr-defaults.patch` and Q4 counter hunks. |
-| Q6 | `Config.ACKDecimation`, off by default, controls ACKs sent by either endpoint for application data. After 100 received packets it ACKs every 4 ack-eliciting packets with delay min(25 ms, min RTT / 4). No environment switch. | `TestConfigACKDecimation`, `TestACKDecimationConnection`, `TestACKDecimationCadence`, `TestACKDecimationCountsAllPackets`, `TestACKDecimationDelay`. | `quic-pacer-ack4.patch`. |
-| Q7 | BBRv3 uses the measured quiche pacer: initial and idle bursts, 0.5 ms lumps bounded by one GSO buffer and a quarter of cwnd, late-wakeup catch-up with a 4 ms debt cap. Only ack-eliciting packets admitted with at least one MSS of pacing budget advance the schedule; packets sent without that budget (PING-ACKs, PTO probes, coalesced extras) do not add debt. The default sender retains the upstream token bucket. | `TestQuichePacerBursts`, `TestQuichePacerLumps`, `TestBBR3LumpSpansHalfMillisecond`, `TestQuichePacerCatchup`, `TestQuichePacerDebtCap`, `TestQuichePacerResets`, `TestBBR3PacerChargesOnlyAdmittedPackets`, `TestBBR3PacerChargesAdmittedPackets`; upstream pacer tests. | `quic-pacer-ack4.patch`. |
-| Q8 | Probe now: `(*Conn).ProbeNow()` requests up to two PING-only 1-RTT packets in PTO backoff with outstanding data. Calls merge and bypass the congestion window while the send queue has room. The call preserves outstanding frames, the scheduled timeout, the probe count, congestion and RTT state; without a call, upstream behavior stays unchanged. | `TestProbeNow`, `TestProbeNowAfterBackoff`. | Direct path recovery. |
+Each patch lives in one of these commits:
+
+- Congestion: `feat(congestion): add an opt-in BBRv3 sender with the quiche pacer`
+- PMTU and adapters: `feat(quic): recover from path MTU black holes through packet adapters`
+- ACK and probes: `feat(conn): add optional ACK decimation and ProbeNow`
+- Scaled gaps: `feat(streams): opt receivers into a scaled stream gap limit`
+
+| Patch | Commit | Why | Intent and Opt-In | Tests | Source |
+|---|---|---|---|---|---|
+| Q1 | Congestion | Shunpike's `n4` policies select BBRv3; upstream offers only its Reno-mode cubicSender. | `Config.CongestionControl = CongestionControlBBRv3` selects the BBRv3 port for initial and migrated paths. The zero value keeps upstream's Reno-mode cubicSender. `CongestionControlName` uses the same factory. | `TestDefaultConfigSelectsUpstreamSender`, `TestSenderIdentityBBRv3`, `TestCongestionControlName`. | `bbr3-quic-go.patch`. |
+| Q2 | Congestion | An `n4` `Policy` picks the loss profile for each connection. | `BBRNoLowerBounds` and `BBRLossThresholdPercent` belong to each sender. Zero percent selects 2 percent; 1-100 are accepted. | `TestBBRLossThresholdBounds`, `TestCongestionControlConfigValidation`. | `bbr3-quic-go.patch`. |
+| Q3 | PMTU and adapters | Packets above a path MTU that shrinks after the handshake are lost, and upstream has no way back to a smaller size. | `PMTUBlackHoleDetection` enables post-handshake data-packet EMSGSIZE and two-PTO fallback to 1200 bytes, then re-probing. Probe errors remain probe losses. | `TestPMTUErrorSignal`. | `quic-pmtu-blackhole.patch`. |
+| Q4 | PMTU and adapters (adapter part); Scaled gaps (gap limit) | Shunpike's packet connection wraps a magicsock bind, not a UDP socket, so it reports DF and GSO through methods. Upstream refuses stream data beyond 1000 gaps, a count that the `n4` client's 128 MiB stream window can pass under loss. | Adapter DF/GSO capabilities opt in through methods. `ScaledStreamGapLimit` enables the current-window gap bound and chooses the search end by offset. Default streams and CRYPTO retain 1000 gaps. The offset rule does not bound the search: a peer that places a large front gap and a dense gap cluster near the tail still costs about window/1024 gap visits per frame (49,153 at 48 MiB, against upstream's 1,000). Shunpike enables it on both client and server receivers; an `n4` server admits only peers with a live lease. | `TestAdapterCapabilities`, `TestAdapterGSOSegments`. | `quic-adapter-pmtu.patch`. |
+| Q5 | Congestion; the PMTU and scaled-gap commits add their counters | Tuning experiments need controls and counters that must not ship in default builds. | `shunpike_research` compiles the QG controls, diagnostic output, `BenchSnapshot`, `BenchBBRTuning` and their counters. They are absent from default builds. | Research-tag control checks and both tagged/default builds. | `quic-bbr-tuning.patch`, `quic-bbr-defaults.patch` and Q4 counter hunks. |
+| Q6 | ACK and probes | Shunpike's default `n4` client policy turns ACK decimation on. | `Config.ACKDecimation`, off by default, controls ACKs sent by either endpoint for application data. After 100 received packets it ACKs every 4 ack-eliciting packets with delay min(25 ms, min RTT / 4). No environment switch. | `TestConfigACKDecimation`, `TestACKDecimationConnection`, `TestACKDecimationCadence`, `TestACKDecimationCountsAllPackets`, `TestACKDecimationDelay`. | `quic-pacer-ack4.patch`. |
+| Q7 | Congestion | BBRv3 needs a pacer that follows the measured quiche reference; 0.5 ms lumps cut send calls and CPU per byte at high rates. | BBRv3 uses the measured quiche pacer: initial and idle bursts, 0.5 ms lumps bounded by one GSO buffer and a quarter of cwnd, late-wakeup catch-up with a 4 ms debt cap. Only ack-eliciting packets admitted with at least one MSS of pacing budget advance the schedule; packets sent without that budget (PING-ACKs, PTO probes, coalesced extras) do not add debt. The default sender retains the upstream token bucket. | `TestQuichePacerBursts`, `TestQuichePacerLumps`, `TestBBR3LumpSpansHalfMillisecond`, `TestQuichePacerCatchup`, `TestQuichePacerDebtCap`, `TestQuichePacerResets`, `TestBBR3PacerChargesOnlyAdmittedPackets`, `TestBBR3PacerChargesAdmittedPackets`; upstream pacer tests. | `quic-pacer-ack4.patch`. |
+| Q8 | ACK and probes | Shunpike calls `ProbeNow` when magicsock confirms that a peer's direct path works again, so QUIC need not wait out its PTO backoff. | Probe now: `(*Conn).ProbeNow()` requests up to two PING-only 1-RTT packets in PTO backoff with outstanding data. Calls merge and bypass the congestion window while the send queue has room. The call preserves outstanding frames, the scheduled timeout, the probe count, congestion and RTT state; without a call, upstream behavior stays unchanged. | `TestProbeNow`, `TestProbeNowAfterBackoff`. | Direct path recovery. |
 
 `CongestionControlBBRv3` is a package constant used in `Config.CongestionControl`.
 BBRv3 does not respond to CE marks, so selecting it disables ECN.
@@ -100,4 +125,4 @@ measured goodput and latency within the baseline intervals.
 ## Upstream Test Fixture
 
 `configWithNonZeroNonFunctionFields` in `config_test.go` supplies nonzero values
-for the five new Config fields. The Clone and populateConfig checks cover them.
+for the six new Config fields. The Clone and populateConfig checks cover them.
