@@ -111,6 +111,9 @@ type Config struct {
 	// BBRLossThresholdPercent is BBR's tolerated loss percentage, from 1 to 100.
 	// Zero uses 2 percent. It has no effect with the default congestion sender.
 	BBRLossThresholdPercent uint8
+	// PMTUBlackHoleDetection enables fallback to 1200 bytes on a post-handshake
+	// data-packet EMSGSIZE or two consecutive PTOs, followed by MTU discovery.
+	PMTUBlackHoleDetection bool
 
 	// GetConfigForClient is called for incoming connections.
 	// If the error is not nil, the connection attempt is refused.

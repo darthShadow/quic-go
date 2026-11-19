@@ -90,9 +90,8 @@ type mtuFinder struct {
 	lastProbeWasLost bool
 
 	// The generation is used to ignore ACKs / losses for probe packets sent before a reset.
-	// Resets happen when the connection is migrated to a new path.
-	// We're therefore not concerned about overflows of this counter.
-	generation uint8
+	// Resets happen on path migration and black-hole recovery.
+	generation uint64
 
 	qlogger qlogwriter.Recorder
 }
@@ -178,7 +177,7 @@ func (f *mtuFinder) Reset(start, max protocol.ByteCount) {
 
 type mtuFinderAckHandler struct {
 	*mtuFinder
-	generation uint8
+	generation uint64
 }
 
 var _ ackhandler.FrameHandler = &mtuFinderAckHandler{}
